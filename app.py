@@ -1,4 +1,4 @@
-from flask import Flask, render_template, Response, jsonify, request, session, flash
+from flask import Flask, render_template, Response, jsonify, request, session, flash, redirect
 from flask_wtf import FlaskForm
 from wtforms import FileField, SubmitField
 from werkzeug.utils import secure_filename
@@ -6,9 +6,9 @@ from wtforms.validators import InputRequired
 import os
 import cv2
 import cvzone
-import math
 import time
 import threading
+import pygame
 from ultralytics import YOLO
 
 # Flask App Configuration
@@ -19,8 +19,9 @@ app.config['UPLOAD_FOLDER'] = 'static/files'
 # Ensure the upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Load YOLO Model
-model = YOLO("best.pt")
+# Load YOLO Model (Memory Optimized)
+model = YOLO("best.pt").to("cpu") # Keep default float32
+ # Force CPU + Use FP16 precision
 
 # Define class names
 classNames = [
@@ -30,45 +31,40 @@ classNames = [
     'protective_suit', 'vest', 'worker'
 ]
 
-# Alert System
-alert_playing = True
+# Alert System using pygame
+pygame.mixer.init()
+alert_playing = False
 alert_lock = threading.Lock()
 
-import pygame
-
 def play_alert():
-    """Play alert sound using pygame."""
-    pygame.mixer.init()
-    pygame.mixer.music.load("alert.mp3")
-
-    while alert_playing:
-        pygame.mixer.music.play()
-        time.sleep(1)  # Prevent overlapping sound
-
-    pygame.mixer.music.stop()
-
-
-
-def trigger_alert(alert_required):
-    """Start or stop the alert sound based on detection."""
+    """Play alert sound once per detection."""
     global alert_playing
     with alert_lock:
-        if alert_required and not alert_playing:
+        if not alert_playing:
             alert_playing = True
-            threading.Thread(target=play_alert, daemon=True).start()
-        elif not alert_required and alert_playing:
+            pygame.mixer.music.load("alert.mp3")
+            pygame.mixer.music.play()
+            time.sleep(1)  # Small delay to avoid overlapping
             alert_playing = False
 
+def trigger_alert(alert_required):
+    """Trigger alert if required."""
+    if alert_required:
+        threading.Thread(target=play_alert, daemon=True).start()
 
 # Flask Form
 class UploadFileForm(FlaskForm):
     file = FileField("File", validators=[InputRequired()])
     submit = SubmitField("Run")
 
-
 def video_detection(input_source):
     """Perform object detection on video or webcam."""
     cap = cv2.VideoCapture(input_source)
+
+    # Reduce Resolution to Save Memory
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
     prev_frame_time = 0
 
     while cap.isOpened():
@@ -76,6 +72,7 @@ def video_detection(input_source):
         if not success:
             break
 
+        img = img.astype('float16')  # Convert image to float16
         results = model(img, stream=True)
         alert_required = False
 
@@ -112,7 +109,6 @@ def generate_frames(input_source):
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
-
 @app.route('/', methods=['GET', 'POST'])
 @app.route('/home', methods=['GET', 'POST'])
 def home():
@@ -120,13 +116,11 @@ def home():
     session.clear()
     return render_template('indexproject.html')
 
-
 @app.route('/webcam', methods=['GET', 'POST'])
 def webcam():
     """Webcam page."""
     session.clear()
     return render_template('ui.html')
-
 
 @app.route('/FrontPage', methods=['GET', 'POST'])
 def front():
@@ -141,7 +135,6 @@ def front():
         flash('Video uploaded successfully!', 'success')
     return render_template('videoprojectnew.html', form=form)
 
-
 @app.route('/video')
 def video():
     """Stream uploaded video."""
@@ -149,14 +142,12 @@ def video():
     if video_path:
         return Response(generate_frames(video_path), mimetype='multipart/x-mixed-replace; boundary=frame')
     flash('No video file uploaded!', 'error')
-    return redirect('/video')
-
+    return redirect('/FrontPage')
 
 @app.route('/webapp')
 def webapp():
     """Stream webcam video."""
     return Response(generate_frames(0), mimetype='multipart/x-mixed-replace; boundary=frame')
-
 
 if __name__ == "__main__":
     app.run(debug=True)
