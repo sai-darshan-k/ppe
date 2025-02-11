@@ -9,7 +9,6 @@ import cvzone
 import math
 import time
 import threading
-from playsound import playsound
 from ultralytics import YOLO
 
 # Flask App Configuration
@@ -35,12 +34,19 @@ classNames = [
 alert_playing = True
 alert_lock = threading.Lock()
 
+import pygame
 
 def play_alert():
-    """Play alert sound in a loop."""
+    """Play alert sound using pygame."""
+    pygame.mixer.init()
+    pygame.mixer.music.load("alert.mp3")
+
     while alert_playing:
-        playsound("alert.mp3", block=False)
+        pygame.mixer.music.play()
         time.sleep(1)  # Prevent overlapping sound
+
+    pygame.mixer.music.stop()
+
 
 
 def trigger_alert(alert_required):
