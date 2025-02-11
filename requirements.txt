@@ -18,3 +18,4 @@ flask_wtf
 WTForms
 Flask-WTF
 gunicorn
+playsound
