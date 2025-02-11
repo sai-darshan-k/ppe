@@ -19,4 +19,4 @@ flask_wtf
 WTForms
 Flask-WTF
 gunicorn
-playsound
+playsound==1.3.0
